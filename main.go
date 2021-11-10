@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/smtp"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	nats "github.com/nats-io/nats.go"
+	"gopkg.in/yaml.v2"
 
 	"github.com/blabu/email/conf"
 	"github.com/blabu/email/dto"
@@ -116,13 +118,33 @@ func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.Serve
 }
 
 func main() {
-	err := conf.ReadConfig("./conf.yaml")
+	if len(os.Args) != 2 {
+		os.Stderr.WriteString("Please insert config file path when run application next time")
+		os.Exit(254)
+	}
+	err := conf.ReadConfig(os.Args[2])
 	if err != nil {
 		os.Stderr.WriteString(err.Error())
+		os.Stderr.WriteString("Please configure application and use it by path " + os.Args[2])
+		if f, err := os.Create(os.Args[2]); err == nil {
+			yaml.NewDecoder(f).Decode(conf.Config)
+		} else {
+			os.Stderr.WriteString(err.Error())
+		}
 		os.Exit(255)
 	}
 	con, err := CreateConnection(conf.Config.Q, conf.Config.CertPath, conf.Config.KeyPath, time.Duration(conf.Config.ReadTimeout), 10)
-	if err != 
+	if err != nil {
+		os.Stderr.WriteString(err.Error())
+		os.Exit(253)
+	}
+	con.Subscribe(conf.Config.ChannelEmail, func(msg *nats.Msg) {
+		var message dto.Message
+		err := json.Unmarshal(msg.Data, &message)
+		if err != nil {
+			//TODO error
+		}
+	})
 	messages := make(chan *dto.Message, len(conf.Config.SMTP))
 	emailErrors := make([]<-chan error, 0, len(conf.Config.SMTP))
 
