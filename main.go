@@ -194,6 +194,14 @@ func GetStatusHandler(channelName, workersName string, con *Subscriber) http.Han
 	}
 }
 
+type notfind struct{}
+
+func (n *notfind) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	w.Write([]byte("{\"err\": \"Not Found, sorry\"}"))
+}
+
 func main() {
 	if len(os.Args) != 2 {
 		os.Stderr.WriteString("Please insert config file path when run application next time\n")
@@ -229,6 +237,7 @@ func main() {
 	router.Use(mux.CORSMethodMiddleware(router))
 	router.Path("/v1/email").Methods("POST").HandlerFunc(GetEmailSenderHandler(messages))
 	router.Path("/status").Methods("GET").HandlerFunc(GetStatusHandler(conf.Config.ChannelEmail, conf.Config.WorkersName, &sub))
+	router.NotFoundHandler = &notfind{}
 	gateway := http.Server{
 		Handler:      router,
 		Addr:         conf.Config.IP,
