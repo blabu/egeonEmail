@@ -30,7 +30,7 @@ type Configuration struct {
 	CertPath     string       `yaml:"cert"`
 	KeyPath      string       `yaml:"key"`
 	SMTP         []ServerSMTP `yaml:"smtp"`
-	Q            Queue        `yaml"queue"`
+	Q            Queue        `yaml:"queue"`
 	ChannelEmail string       `yaml:"channelEmail"`
 	WorkersName  string       `yaml:"workersName"`
 }

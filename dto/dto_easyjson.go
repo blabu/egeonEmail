@@ -90,6 +90,10 @@ func easyjson56de76c1DecodeGithubComBlabuEmailDto(in *jlexer.Lexer, out *Message
 			out.Subject = string(in.String())
 		case "data":
 			out.Data = string(in.String())
+		case "timestamp":
+			out.Timestamp = int64(in.Int64())
+		case "hash":
+			out.Hash = string(in.String())
 		default:
 			in.SkipRecursive()
 		}
@@ -155,6 +159,16 @@ func easyjson56de76c1EncodeGithubComBlabuEmailDto(out *jwriter.Writer, in Messag
 		const prefix string = ",\"data\":"
 		out.RawString(prefix)
 		out.String(string(in.Data))
+	}
+	{
+		const prefix string = ",\"timestamp\":"
+		out.RawString(prefix)
+		out.Int64(int64(in.Timestamp))
+	}
+	{
+		const prefix string = ",\"hash\":"
+		out.RawString(prefix)
+		out.String(string(in.Hash))
 	}
 	out.RawByte('}')
 }

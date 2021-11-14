@@ -7,4 +7,6 @@ type Message struct {
 	ContentType string   `json:"type"`
 	Subject     string   `json:"subject"`
 	Data        string   `json:"data"`
+	Timestamp   int64    `json:"timestamp"`
+	Hash        string   `json:"hash"`
 }
