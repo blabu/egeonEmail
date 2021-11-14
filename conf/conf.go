@@ -32,7 +32,7 @@ type Configuration struct {
 	SMTP         []ServerSMTP `yaml:"smtp"`
 	Q            Queue        `yaml"queue"`
 	ChannelEmail string       `yaml:"channelEmail"`
-	ChannelError string       `yaml:"channelError"`
+	WorkersName  string       `yaml:"workersName"`
 }
 
 func ReadConfig(path string) error {

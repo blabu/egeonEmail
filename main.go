@@ -44,9 +44,9 @@ func CreateConnection(cred conf.Queue, certPath, keyPath string, timeout time.Du
 	return queue, err
 }
 
-func (c *Connection) Subscribe(subject string, handler nats.MsgHandler) error {
+func (c *Connection) Subscribe(subject, workersName string, handler nats.MsgHandler) error {
 	c.handlers[subject] = handler
-	_, err := c.con.Subscribe(subject, func(msg *nats.Msg) {
+	_, err := c.con.QueueSubscribe(subject, workersName, func(msg *nats.Msg) {
 		handler(msg)
 	})
 	return err
@@ -90,8 +90,7 @@ func (c *Connection) Close() {
 	c.con.Close()
 }
 
-func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.ServerSMTP) (func(), <-chan error) {
-	errCh := make(chan error, poolSz)
+func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.ServerSMTP) func() {
 	host, _, _ := net.SplitHostPort(accaunt.Host)
 	p, err := email.NewPool(
 		accaunt.Host,
@@ -99,8 +98,7 @@ func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.Serve
 		smtp.PlainAuth("", accaunt.Source, accaunt.Pass, host),
 	)
 	if err != nil {
-		errCh <- err
-		return func() { close(errCh) }, errCh
+		return nil
 	}
 	return func() {
 		for msg := range ch {
@@ -109,12 +107,9 @@ func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.Serve
 				To:   msg.To,
 				Cc:   msg.Copy,
 			}
-			if err = p.Send(&e, time.Duration(accaunt.Timeout)*time.Second); err != nil {
-				errCh <- fmt.Errorf("Error %s when try send across %s for username %s", err.Error(), accaunt.Host, accaunt.Source)
-			}
+			p.Send(&e, time.Duration(accaunt.Timeout)*time.Second)
 		}
-		close(errCh)
-	}, errCh
+	}
 }
 
 func main() {
@@ -138,20 +133,20 @@ func main() {
 		os.Stderr.WriteString(err.Error())
 		os.Exit(253)
 	}
-	con.Subscribe(conf.Config.ChannelEmail, func(msg *nats.Msg) {
+	messages := make(chan *dto.Message, len(conf.Config.SMTP))
+	con.Subscribe(conf.Config.ChannelEmail, conf.Config.WorkersName, func(msg *nats.Msg) {
 		var message dto.Message
 		err := json.Unmarshal(msg.Data, &message)
 		if err != nil {
-			//TODO error
+			msg.Respond([]byte(err.Error()))
+		} else {
+			messages <- &message
 		}
 	})
-	messages := make(chan *dto.Message, len(conf.Config.SMTP))
-	emailErrors := make([]<-chan error, 0, len(conf.Config.SMTP))
-
 	for _, accaunt := range conf.Config.SMTP {
-		handler, errCh := ServeEmailSender(messages, accaunt.Count, &accaunt)
-		go handler()
-		emailErrors = append(emailErrors, errCh)
+		if handler := ServeEmailSender(messages, accaunt.Count, &accaunt); handler != nil {
+			go handler()
+		}
 	}
 }
 
