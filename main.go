@@ -3,10 +3,13 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/smtp"
@@ -24,29 +27,42 @@ import (
 
 type Subscriber struct {
 	isClose  bool
+	log      io.StringWriter
 	cred     conf.Queue
 	conf     *tls.Config
 	con      *nats.Conn
 	handlers map[string]nats.MsgHandler
 }
 
-func CreateConnection(cred conf.Queue, certPath, keyPath string, timeout time.Duration, attempt int) (Subscriber, error) {
+func CreateConnection(cred conf.Queue, timeout time.Duration, log io.StringWriter) (*Subscriber, error) {
 	var queue = Subscriber{
 		cred:     cred,
 		handlers: make(map[string]nats.MsgHandler),
+		log:      log,
 	}
 	var err error
-	if len(certPath) > 0 && len(keyPath) > 0 {
-		if cert, err := tls.LoadX509KeyPair(certPath, keyPath); err == nil {
+	if len(cred.ClientCert) > 0 && len(cred.ClientKey) > 0 {
+		if cert, err := tls.LoadX509KeyPair(cred.ClientCert, cred.ClientKey); err == nil {
 			queue.conf = &tls.Config{
+				MinVersion:         tls.VersionTLS12,
 				ServerName:         cred.Host,
 				Certificates:       []tls.Certificate{cert},
-				InsecureSkipVerify: true,
+				InsecureSkipVerify: false,
 			}
 		}
 	}
-	queue.con, err = queue.connect(timeout, attempt)
-	return queue, err
+	if data, err := ioutil.ReadFile(cred.CA); err == nil && data != nil {
+		rootPEM := x509.NewCertPool()
+		if ok := rootPEM.AppendCertsFromPEM(data); !ok {
+			return nil, errors.New("Can not parse a root certificate from file " + cred.CA)
+		}
+		if queue.conf == nil {
+			queue.conf = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		queue.conf.RootCAs = rootPEM
+	}
+	queue.con, err = queue.connect(timeout, cred.Attempt)
+	return &queue, err
 }
 
 func (c *Subscriber) Subscribe(subject, workersName string, handler nats.MsgHandler) error {
@@ -69,40 +85,35 @@ func (c *Subscriber) Status() (string, error) {
 }
 
 func (c *Subscriber) connect(timeout time.Duration, attempt int) (*nats.Conn, error) {
-	if c.conf != nil {
-		if con, err := nats.Connect(
-			fmt.Sprintf("nats://%s", c.cred.Host),
-			nats.Secure(c.conf),
-			nats.RetryOnFailedConnect(true),
-			nats.MaxReconnects(attempt),
-			nats.ReconnectWait(timeout),
-			nats.UserInfo(c.cred.Login, c.cred.Pass),
-			nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-				os.Stderr.WriteString("Client disconnected: " + err.Error() + "\n")
-			}),
-			nats.ReconnectHandler(func(_ *nats.Conn) {
-				os.Stderr.WriteString("client Reconnected\n")
-			}),
-		); err == nil {
-			return con, nil
-		}
-	}
-	return nats.Connect(
-		fmt.Sprintf("nats://%s", c.cred.Host),
+	con, err := nats.Connect(
+		fmt.Sprintf("tls://%s", c.cred.Host),
+		nats.Secure(c.conf),
 		nats.RetryOnFailedConnect(true),
 		nats.MaxReconnects(attempt),
 		nats.ReconnectWait(timeout),
 		nats.UserInfo(c.cred.Login, c.cred.Pass),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			if err != nil {
+				c.log.WriteString("Client disconnected: " + err.Error() + "\n")
+			} else {
+				c.log.WriteString("Client disconnected")
+			}
+		}),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			c.log.WriteString("Client Reconnected\n")
+		}),
 	)
+	return con, err
 }
 
 func (c *Subscriber) Close() {
+	c.log.WriteString("Close connection")
 	c.isClose = true
 	c.con.Flush()
 	c.con.Close()
 }
 
-func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.ServerSMTP) func() {
+func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.ServerSMTP, log io.StringWriter) func() {
 	host, _, _ := net.SplitHostPort(accaunt.Host)
 	p, err := email.NewPool(
 		accaunt.Host,
@@ -110,6 +121,7 @@ func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.Serve
 		smtp.PlainAuth("", accaunt.Source, accaunt.Pass, host),
 	)
 	if err != nil {
+		log.WriteString(fmt.Sprintf("Error %s when try create email sender pool\n", err.Error()))
 		return nil
 	}
 	return func() {
@@ -120,16 +132,18 @@ func ServeEmailSender(ch <-chan *dto.Message, poolSz uint16, accaunt *conf.Serve
 				To:   msg.To,
 				Cc:   msg.Copy,
 			}
-			p.Send(&e, time.Duration(accaunt.Timeout)*time.Second)
+			if err := p.Send(&e, time.Duration(accaunt.Timeout)*time.Second); err != nil {
+				log.WriteString(fmt.Sprintf("Error %s when try send email\n", err.Error()))
+			}
 		}
 	}
 }
 
-func GetReceiveMessageHandler(messages chan<- *dto.Message) nats.MsgHandler {
+func GetReceiveMessageHandler(messages chan<- *dto.Message, log io.StringWriter) nats.MsgHandler {
 	return func(msg *nats.Msg) {
 		var message dto.Message
 		if err := json.Unmarshal(msg.Data, &message); err != nil {
-			os.Stderr.WriteString(fmt.Sprintf("Error %s. When try read from channel %s\n", err.Error(), conf.Config.ChannelEmail))
+			log.WriteString(fmt.Sprintf("Error %s. When try read from channel %s\n", err.Error(), conf.Config.ChannelEmail))
 		} else {
 			hash := sha256.Sum256([]byte(message.Data))
 			message.Hash = base64.StdEncoding.EncodeToString(hash[:])
@@ -177,16 +191,14 @@ func GetStatusHandler(channelName, workersName string, con *Subscriber) http.Han
 	ans.Entity["app"] = os.Args[0]
 	ans.Methods["/v1/email POST"] = "Try send an email. dto.Message must be in request body"
 	ans.Methods["/status GET"] = "Get this status of service and documentation"
-	ans.Methods[fmt.Sprintf("nats://queue/%s/%s", channelName, workersName)] = "Put email into message queue. External NATS service"
+	ans.Methods[fmt.Sprintf("tls://%s/queue/%s/%s", con.cred.Host, channelName, workersName)] = "Put email into message queue. External NATS service"
 	return func(w http.ResponseWriter, r *http.Request) {
 		status, err := con.Status()
 		if err != nil {
-			w.Header().Add("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-			return
+			ans.Entity["nats"] = err.Error()
+		} else {
+			ans.Entity["nats"] = status
 		}
-		ans.Entity["nats"] = status
 		ans.Entity["workTime"] = time.Now().Sub(startTime).String()
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -220,23 +232,23 @@ func main() {
 		}
 		os.Exit(255)
 	}
-	sub, err := CreateConnection(conf.Config.Q, conf.Config.CertPath, conf.Config.KeyPath, time.Duration(conf.Config.ReadTimeout), 10)
+	sub, err := CreateConnection(conf.Config.Q, time.Duration(conf.Config.ReadTimeout), os.Stderr)
 	if err != nil {
 		os.Stderr.WriteString(err.Error() + "\n")
 		os.Exit(253)
 	}
 	defer sub.Close()
 	messages := make(chan *dto.Message, len(conf.Config.SMTP))
-	sub.Subscribe(conf.Config.ChannelEmail, conf.Config.WorkersName, GetReceiveMessageHandler(messages))
+	sub.Subscribe(conf.Config.ChannelEmail, conf.Config.WorkersName, GetReceiveMessageHandler(messages, os.Stderr))
 	for _, accaunt := range conf.Config.SMTP {
-		if handler := ServeEmailSender(messages, accaunt.Count, &accaunt); handler != nil {
+		if handler := ServeEmailSender(messages, accaunt.Count, &accaunt, os.Stderr); handler != nil {
 			go handler()
 		}
 	}
 	router := mux.NewRouter()
 	router.Use(mux.CORSMethodMiddleware(router))
 	router.Path("/v1/email").Methods("POST").HandlerFunc(GetEmailSenderHandler(messages))
-	router.Path("/status").Methods("GET").HandlerFunc(GetStatusHandler(conf.Config.ChannelEmail, conf.Config.WorkersName, &sub))
+	router.Path("/status").Methods("GET").HandlerFunc(GetStatusHandler(conf.Config.ChannelEmail, conf.Config.WorkersName, sub))
 	router.NotFoundHandler = &notfind{}
 	gateway := http.Server{
 		Handler:      router,
@@ -245,19 +257,19 @@ func main() {
 		ReadTimeout:  time.Duration(conf.Config.ReadTimeout) * time.Second,
 	}
 
-	serve := GetHTTPServe(&gateway, conf.Config.CertPath, conf.Config.KeyPath)
+	serve := GetHTTPServe(&gateway, conf.Config.CertPath, conf.Config.KeyPath, os.Stdout)
 	os.Stderr.WriteString(serve().Error() + "\n")
 }
 
-func GetHTTPServe(gateway *http.Server, certPath, privateKeyPath string) func() error {
+func GetHTTPServe(gateway *http.Server, certPath, privateKeyPath string, log io.StringWriter) func() error {
 	if len(certPath) > 0 && len(privateKeyPath) > 0 {
-		os.Stdout.WriteString("Try start https service with certificat in " + certPath + "\n")
+		log.WriteString("Try start https service with certificat in " + certPath + "\n")
 		if cert, err := tls.LoadX509KeyPair(certPath, privateKeyPath); err == nil {
 			gateway.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
-			os.Stdout.WriteString("Start https service\n")
+			log.WriteString("Start https service\n")
 			return func() error { return gateway.ListenAndServeTLS("", "") }
 		}
 	}
-	os.Stdout.WriteString("Start http service. It's not secure\n")
+	log.WriteString(fmt.Sprintf("Start http service on %s. It's not secure\n", gateway.Addr))
 	return func() error { return gateway.ListenAndServe() }
 }

@@ -19,9 +19,13 @@ type ServerSMTP struct {
 }
 
 type Queue struct {
-	Host  string `yaml:"host"`
-	Login string `yaml:"login"`
-	Pass  string `yaml:"pass"`
+	Host       string `yaml:"host"`
+	Login      string `yaml:"login"`
+	Pass       string `yaml:"pass"`
+	Attempt    int    `yaml:"attempt"`
+	CA         string `yaml:"ca"`
+	ClientCert string `yaml:"clientCert"`
+	ClientKey  string `yaml:"clientKey"`
 }
 
 type Configuration struct {
