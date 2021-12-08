@@ -17,7 +17,7 @@ var (
 	_ easyjson.Marshaler
 )
 
-func easyjson56de76c1DecodeGithubComBlabuEmailDto(in *jlexer.Lexer, out *Message) {
+func easyjson56de76c1DecodeGithubComBlabuEgeonEmailDto(in *jlexer.Lexer, out *Message) {
 	isTopLevel := in.IsStart()
 	if in.IsNull() {
 		if isTopLevel {
@@ -104,7 +104,7 @@ func easyjson56de76c1DecodeGithubComBlabuEmailDto(in *jlexer.Lexer, out *Message
 		in.Consumed()
 	}
 }
-func easyjson56de76c1EncodeGithubComBlabuEmailDto(out *jwriter.Writer, in Message) {
+func easyjson56de76c1EncodeGithubComBlabuEgeonEmailDto(out *jwriter.Writer, in Message) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -176,23 +176,23 @@ func easyjson56de76c1EncodeGithubComBlabuEmailDto(out *jwriter.Writer, in Messag
 // MarshalJSON supports json.Marshaler interface
 func (v Message) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
-	easyjson56de76c1EncodeGithubComBlabuEmailDto(&w, v)
+	easyjson56de76c1EncodeGithubComBlabuEgeonEmailDto(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
 func (v Message) MarshalEasyJSON(w *jwriter.Writer) {
-	easyjson56de76c1EncodeGithubComBlabuEmailDto(w, v)
+	easyjson56de76c1EncodeGithubComBlabuEgeonEmailDto(w, v)
 }
 
 // UnmarshalJSON supports json.Unmarshaler interface
 func (v *Message) UnmarshalJSON(data []byte) error {
 	r := jlexer.Lexer{Data: data}
-	easyjson56de76c1DecodeGithubComBlabuEmailDto(&r, v)
+	easyjson56de76c1DecodeGithubComBlabuEgeonEmailDto(&r, v)
 	return r.Error()
 }
 
 // UnmarshalEasyJSON supports easyjson.Unmarshaler interface
 func (v *Message) UnmarshalEasyJSON(l *jlexer.Lexer) {
-	easyjson56de76c1DecodeGithubComBlabuEmailDto(l, v)
+	easyjson56de76c1DecodeGithubComBlabuEgeonEmailDto(l, v)
 }

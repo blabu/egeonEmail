@@ -17,9 +17,9 @@ import (
 	nats "github.com/nats-io/nats.go"
 	"gopkg.in/yaml.v2"
 
-	"github.com/blabu/email/conf"
-	"github.com/blabu/email/dto"
-	"github.com/blabu/email/email"
+	"github.com/blabu/egeonEmail/conf"
+	"github.com/blabu/egeonEmail/dto"
+	"github.com/blabu/egeonEmail/email"
 )
 
 type Subscriber struct {
