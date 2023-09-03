@@ -1,0 +1,25 @@
+ip: ":45460"
+timeout: 10
+cert: "/etc/egeon/egeonemail-crt.pem"
+key: "/etc/egeon/egeonemail-key.pem"
+smtp:
+  - host: smtp.gmail.com:587
+    source: egeon.system@gmail.com
+    pass: BlaRootBu_trah
+    timeout: 10
+    count: 2
+  - host: smtp.gmail.com:587
+    source: aqua.ukraine.service@gmail.com
+    pass: BlaibnBu_trah
+    timeout: 10
+    count: 2
+queue:
+  host: "msgbroker:4222"
+  login: "blabu"
+  pass: "BlaRootBuPass_q1w2e3"
+  ca: "/etc/egeon/ca-crt.pem"
+  attempt: 5
+  clientCert: "/etc/egeon/egeonemail-crt.pem"
+  clientKey: "/etc/egeon/egeonemail-key.pem"
+channelEmail: "emails"
+workersName: "worker1"
